@@ -1,24 +1,21 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
+from discord import app_commands
 import requests
-import json
-import os
 
-# Bot setup
-TOKEN = 'MTM3NzUyMDQxMDc0NDMyNDIwNg.G3whaQ.EEHaFwq0K31cgCkT8-1zG933i6B2j8_84rl-_k'
+TOKEN = 'MTM3NzY4MzU5MTY1OTUyMDAyMQ.GwmnWw.1uFo4qHVxwtR6stVqt4GvUegj8KGdQ7i77WyIA'
 PANEL_URL = 'http://panel.dragoncloud.ggff.net'
-API_KEY = 'ptlc_OmXsasCHtMYaeSkv2n3KEJq92qw0yJ0s1OOtS9g8DMh'
+API_KEY = 'YOUR_PTERODACTYL_API_KEY'
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='.', intents=intents)
+bot = commands.Bot(command_prefix='/', intents=intents)
+tree = bot.tree
 
-# Simulated database (you should replace this with actual storage like SQLite or JSON file)
 user_credits = {}
 redeem_codes = {}
-admin_ids = set(1159037240622723092)
+admin_ids = set([1159037240622723092])  # Replace with your actual Discord ID
 
-# ---------------------- Utility ----------------------
 def get_headers():
     return {
         "Authorization": f"Bearer {API_KEY}",
@@ -26,142 +23,103 @@ def get_headers():
         "Accept": "Application/vnd.pterodactyl.v1+json"
     }
 
-# ---------------------- Admin Control ----------------------
-@bot.command()
-async def add_admin(ctx, user_id: int):
-    if ctx.author.guild_permissions.administrator:
-        admin_ids.add(user_id)
-        await ctx.send(f"✅ Added user {user_id} to admin list.")
-    else:
-        await ctx.send("❌ Only administrators can add admins.")
+@bot.event
+async def on_ready():
+    await tree.sync()
+    print(f'✅ Bot is ready. Logged in as {bot.user}')
 
-@bot.command()
-async def status(ctx):
-    if ctx.author.id not in admin_ids:
-        return await ctx.send("❌ Only admins can use this command.")
-    res = requests.get(f"{PANEL_URL}/api/application/servers", headers=get_headers())
-    if res.status_code == 200:
-        data = res.json()['data']
-        msg = "📊 **Panel Servers:**\n"
-        for server in data[:10]:
-            s = server['attributes']
-            msg += f"- {s['name']} | {s['uuidShort']} | Owner: {s['user']}\n"
-        await ctx.send(msg)
-    else:
-        await ctx.send(f"❌ Failed to fetch servers: {res.text}")
-
-@bot.command()
-async def removeserver(ctx, user_id: int, email: str):
-    if ctx.author.id not in admin_ids:
-        return await ctx.send("❌ Only admins can use this command.")
-    users = requests.get(f"{PANEL_URL}/api/application/users", headers=get_headers()).json()
-    for user in users['data']:
-        if user['attributes']['email'] == email:
-            uid = user['attributes']['id']
-            res = requests.delete(f"{PANEL_URL}/api/application/users/{uid}?force=true", headers=get_headers())
-            if res.status_code == 204:
-                await ctx.send(f"🗑️ Successfully removed user `{email}` and their servers.")
-            else:
-                await ctx.send(f"❌ Error removing user: {res.text}")
-            return
-    await ctx.send("❌ User not found.")
-
-@bot.command()
-async def removeaccount(ctx, user_id: int, email: str):
-    if ctx.author.id not in admin_ids:
-        return await ctx.send("❌ Only admins can use this command.")
-    users = requests.get(f"{PANEL_URL}/api/application/users", headers=get_headers()).json()
-    for user in users['data']:
-        if user['attributes']['email'] == email:
-            uid = user['attributes']['id']
-            res = requests.delete(f"{PANEL_URL}/api/application/users/{uid}?force=true", headers=get_headers())
-            if res.status_code == 204:
-                await ctx.send(f"🗑️ Successfully removed user `{email}`.")
-            else:
-                await ctx.send(f"❌ Error: {res.text}")
-            return
-    await ctx.send("❌ User not found.")
-
-# ---------------------- Registration Alias ----------------------
-@bot.command()
-async def register(ctx, email: str, password: str):
-    await createaccount(ctx, email, password)
-
-# ---------------------- Account Creation ----------------------
-@bot.command()
-async def createaccount(ctx, email: str, password: str):
+@tree.command(name="register", description="Register on the Pterodactyl panel")
+@app_commands.describe(email="Your email", password="Your password")
+async def register(interaction: discord.Interaction, email: str, password: str):
+    username = email.split('@')[0]
     data = {
-        "username": email.split('@')[0],
+        "username": username,
         "email": email,
-        "first_name": ctx.author.name,
+        "first_name": interaction.user.name,
         "last_name": "PteroDash",
         "password": password
     }
     res = requests.post(f"{PANEL_URL}/api/application/users", json=data, headers=get_headers())
     if res.status_code == 201:
-        user_credits[str(ctx.author.id)] = 250
-        await ctx.send(f"✅ Account created at {PANEL_URL} with 250 credits.")
+        user_credits[str(interaction.user.id)] = 0
+        await interaction.response.send_message("✅ Account created. No credits added.", ephemeral=True)
     else:
-        await ctx.send(f"❌ Error: {res.text}")
+        await interaction.response.send_message(f"❌ Error: {res.text}", ephemeral=True)
 
-# ---------------------- Credits ----------------------
-@bot.command()
-async def credits(ctx):
-    uid = str(ctx.author.id)
-    user_credits.setdefault(uid, 250)
-    await ctx.send(f"💰 You have {user_credits[uid]} credits.")
+@tree.command(name="credits", description="Check your credits")
+async def credits(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user_credits.setdefault(uid, 0)
+    await interaction.response.send_message(f"💰 You have {user_credits[uid]} credits.", ephemeral=True)
 
-@bot.command()
-async def redeem(ctx, code: str):
-    uid = str(ctx.author.id)
+@tree.command(name="createredeemcode", description="Create a redeemable code (admin)")
+@app_commands.describe(name="Code name", amount="Credit amount")
+async def createredeemcode(interaction: discord.Interaction, name: str, amount: int):
+    if interaction.user.id not in admin_ids:
+        return await interaction.response.send_message("❌ Only admins can use this.", ephemeral=True)
+    redeem_codes[name] = amount
+    await interaction.response.send_message(f"✅ Created code `{name}` for {amount} credits.", ephemeral=True)
+
+@tree.command(name="addredeemcode", description="Add credits to a user (admin)")
+@app_commands.describe(userid="User ID", amount="Amount to add")
+async def addredeemcode(interaction: discord.Interaction, userid: int, amount: int):
+    if interaction.user.id not in admin_ids:
+        return await interaction.response.send_message("❌ Only admins can use this.", ephemeral=True)
+    user_credits[str(userid)] = user_credits.get(str(userid), 0) + amount
+    await interaction.response.send_message(f"✅ Added {amount} credits to user {userid}.", ephemeral=True)
+
+@tree.command(name="redeem", description="Redeem a credit code")
+@app_commands.describe(code="The code to redeem")
+async def redeem(interaction: discord.Interaction, code: str):
+    uid = str(interaction.user.id)
     if code in redeem_codes:
         amount = redeem_codes.pop(code)
-        user_credits[uid] = user_credits.get(uid, 250) + amount + 50
-        await ctx.send(f"✅ Redeemed {amount}+50 credits! Total: {user_credits[uid]}")
+        user_credits[uid] = user_credits.get(uid, 0) + amount + 50
+        await interaction.response.send_message(f"✅ Redeemed {amount}+50 credits! Total: {user_credits[uid]}", ephemeral=True)
     else:
-        await ctx.send("❌ Invalid or already used code.")
+        await interaction.response.send_message("❌ Invalid or already used code.", ephemeral=True)
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def addredeemcode(ctx, userid: int, amount: int):
-    user_credits[str(userid)] = user_credits.get(str(userid), 250) + amount
-    await ctx.send(f"✅ Added {amount} credits to user {userid}.")
+@tree.command(name="add_admin", description="Add admin user ID")
+@app_commands.describe(userid="Discord User ID to add")
+async def add_admin(interaction: discord.Interaction, userid: int):
+    if interaction.user.id not in admin_ids:
+        return await interaction.response.send_message("❌ Only admins can use this.", ephemeral=True)
+    admin_ids.add(userid)
+    await interaction.response.send_message(f"✅ Added user {userid} as admin.", ephemeral=True)
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def createredeemcode(ctx, codename: str, amount: int):
-    redeem_codes[codename] = amount
-    await ctx.send(f"✅ Created redeem code `{codename}` for {amount} credits.")
+@tree.command(name="createserver", description="Create a server on the Pterodactyl panel")
+@app_commands.describe(name="Server name")
+async def createserver(interaction: discord.Interaction, name: str):
+    uid = str(interaction.user.id)
+    user_credits.setdefault(uid, 0)
+    if user_credits[uid] < 250:
+        return await interaction.response.send_message("❌ Not enough credits. You need 250.", ephemeral=True)
 
-# ---------------------- Server Creation ----------------------
-@bot.command()
-async def createserver(ctx):
-    uid = str(ctx.author.id)
-    if user_credits.get(uid, 250) < 250:
-        return await ctx.send("❌ You need at least 250 credits.")
+    nodes_res = requests.get(f"{PANEL_URL}/api/application/nodes", headers=get_headers())
+    if nodes_res.status_code != 200:
+        return await interaction.response.send_message("❌ Failed to fetch nodes.", ephemeral=True)
 
-    users = requests.get(f"{PANEL_URL}/api/application/users", headers=get_headers()).json()
-    email = f"{ctx.author.name.lower()}@pterodash.fake"
-    user_id = None
-    for user in users['data']:
-        if user['attributes']['email'] == email:
-            user_id = user['attributes']['id']
-            break
-    if not user_id:
-        return await ctx.send("❌ You must create an account first using `.createaccount`.")
+    nodes_data = nodes_res.json()["data"]
+    available_nodes = [node["attributes"]["id"] for node in nodes_data if node["attributes"]["name"] not in ["in1", "Paris"]]
 
-    nodes = requests.get(f"{PANEL_URL}/api/application/nodes", headers=get_headers()).json()
-    options = [n for n in nodes['data'] if n['attributes']['name'].lower() not in ['in1', 'paris']]
-    if not options:
-        return await ctx.send("❌ No available nodes found.")
-    node_id = options[0]['attributes']['id']
+    if not available_nodes:
+        return await interaction.response.send_message("❌ No available nodes.", ephemeral=True)
+
+    selected_node = available_nodes[0]
+
+    users_res = requests.get(f"{PANEL_URL}/api/application/users", headers=get_headers())
+    panel_users = users_res.json()["data"]
+    panel_user_id = next((u["attributes"]["id"] for u in panel_users if u["attributes"]["email"].startswith(interaction.user.name)), None)
+
+    if not panel_user_id:
+        return await interaction.response.send_message("❌ You must register first using /register.", ephemeral=True)
 
     server_data = {
-        "name": f"{ctx.author.name}-server",
-        "user": user_id,
+        "name": name,
+        "user": panel_user_id,
         "egg": 1,
-        "docker_image": "ghcr.io/pterodactyl/yolks:java_17",
-        "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar",
+        "docker_image": "ghcr.io/parkervcp/yolks:nodejs_18",
+        "startup": "npm run start",
         "limits": {
             "memory": 4096,
             "swap": 0,
@@ -169,46 +127,28 @@ async def createserver(ctx):
             "io": 500,
             "cpu": 150
         },
-        "feature_limits": {"databases": 0, "allocations": 1, "backups": 0},
-        "environment": {},
+        "feature_limits": {
+            "databases": 1,
+            "backups": 1,
+            "allocations": 1
+        },
+        "environment": {
+            "USER_UPLOAD": "true"
+        },
         "deploy": {
-            "locations": [node_id],
+            "locations": [selected_node],
             "dedicated_ip": False,
             "port_range": []
         },
-        "allocation": {"default": 1}
+        "start_on_completion": True
     }
-    res = requests.post(f"{PANEL_URL}/api/application/servers", json=server_data, headers=get_headers())
-    if res.status_code == 201:
+
+    server_res = requests.post(f"{PANEL_URL}/api/application/servers", json=server_data, headers=get_headers())
+    if server_res.status_code == 201:
         user_credits[uid] -= 250
-        await ctx.send(f"✅ Server created at {PANEL_URL}. 250 credits deducted.")
+        await interaction.response.send_message(f"✅ Server created and 250 credits deducted. Remaining: {user_credits[uid]}", ephemeral=True)
     else:
-        await ctx.send(f"❌ Error creating server: {res.text}")
-
-# ---------------------- Server Control ----------------------
-@bot.command()
-async def servercontrol(ctx):
-    uid = str(ctx.author.id)
-    users = requests.get(f"{PANEL_URL}/api/application/users", headers=get_headers()).json()
-    user_id = None
-    for user in users['data']:
-        if user['attributes']['email'] == f"{ctx.author.name.lower()}@pterodash.fake":
-            user_id = user['attributes']['id']
-            break
-    if not user_id:
-        return await ctx.send("❌ You must create an account first.")
-
-    servers = requests.get(f"{PANEL_URL}/api/application/users/{user_id}/servers", headers=get_headers()).json()
-    if not servers['data']:
-        return await ctx.send("❌ No servers found for your account.")
-
-    for s in servers['data']:
-        name = s['attributes']['name']
-        ip = s['attributes']['allocation']['ip_alias'] or s['attributes']['allocation']['ip']
-        embed = discord.Embed(title=name, description=f"IP: {ip}", color=0x00ff00)
-        embed.add_field(name="Start", value="🟢 `.start <uuid>`", inline=True)
-        embed.add_field(name="Stop", value="🔴 `.stop <uuid>`", inline=True)
-        embed.add_field(name="Reinstall", value="🟡 `.reinstall <uuid>`", inline=True)
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(f"❌ Server creation failed: {server_res.text}", ephemeral=True)
 
 bot.run(TOKEN)
+    
