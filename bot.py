@@ -1,14 +1,7 @@
-from pathlib import Path
-import json
-
-# Define the contents of the fixed bot.py file
-bot_py_code = '''
 import discord
 from discord.ext import commands
 from discord import app_commands
 import requests
-import json
-import os
 
 TOKEN = 'BOT_TOKEN'
 PANEL_URL = 'http://panel.dragoncloud.ggff.net'
@@ -19,25 +12,10 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 tree = bot.tree
 
-USERS_FILE = 'users.json'
-CREDITS_FILE = 'credits.json'
-REDEEM_CODES_FILE = 'redeem_codes.json'
-admin_ids = set([1159037240622723092])  # Replace with your Discord ID
-
-def load_json(filename):
-    if not os.path.exists(filename):
-        with open(filename, 'w') as f:
-            json.dump({}, f)
-    with open(filename, 'r') as f:
-        return json.load(f)
-
-def save_json(filename, data):
-    with open(filename, 'w') as f:
-        json.dump(data, f, indent=4)
-
-user_credits = load_json(CREDITS_FILE)
-redeem_codes = load_json(REDEEM_CODES_FILE)
-users_data = load_json(USERS_FILE)
+user_credits = {}
+redeem_codes = {}
+admin_ids = set([1159037240622723092])  # Replace with your admin Discord ID
+user_emails = {}  # Stores emails by user ID for registration tracking
 
 def get_headers():
     return {
@@ -64,15 +42,9 @@ async def register(interaction: discord.Interaction, email: str, password: str):
     }
     res = requests.post(f"{PANEL_URL}/api/application/users", json=data, headers=get_headers())
     if res.status_code == 201:
-        panel_user = res.json()["attributes"]
-        users_data[str(interaction.user.id)] = {
-            "panel_id": panel_user["id"],
-            "email": email
-        }
-        save_json(USERS_FILE, users_data)
         user_credits[str(interaction.user.id)] = 0
-        save_json(CREDITS_FILE, user_credits)
-        await interaction.response.send_message("✅ Account created and registered. You have 0 credits.", ephemeral=True)
+        user_emails[str(interaction.user.id)] = email
+        await interaction.response.send_message("✅ Account created. No credits added.", ephemeral=True)
     else:
         await interaction.response.send_message(f"❌ Error: {res.text}", ephemeral=True)
 
@@ -80,25 +52,22 @@ async def register(interaction: discord.Interaction, email: str, password: str):
 async def credits(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     user_credits.setdefault(uid, 0)
-    save_json(CREDITS_FILE, user_credits)
     await interaction.response.send_message(f"💰 You have {user_credits[uid]} credits.", ephemeral=True)
 
-@tree.command(name="createredeemcode", description="Create a redeemable code (admin only)")
+@tree.command(name="createredeemcode", description="Create a redeemable code (admin)")
 @app_commands.describe(name="Code name", amount="Credit amount")
 async def createredeemcode(interaction: discord.Interaction, name: str, amount: int):
     if interaction.user.id not in admin_ids:
         return await interaction.response.send_message("❌ Only admins can use this.", ephemeral=True)
     redeem_codes[name] = amount
-    save_json(REDEEM_CODES_FILE, redeem_codes)
     await interaction.response.send_message(f"✅ Created code `{name}` for {amount} credits.", ephemeral=True)
 
-@tree.command(name="addredeemcode", description="Add credits to a user (admin only)")
+@tree.command(name="addredeemcode", description="Add credits to a user (admin)")
 @app_commands.describe(userid="User ID", amount="Amount to add")
 async def addredeemcode(interaction: discord.Interaction, userid: int, amount: int):
     if interaction.user.id not in admin_ids:
         return await interaction.response.send_message("❌ Only admins can use this.", ephemeral=True)
     user_credits[str(userid)] = user_credits.get(str(userid), 0) + amount
-    save_json(CREDITS_FILE, user_credits)
     await interaction.response.send_message(f"✅ Added {amount} credits to user {userid}.", ephemeral=True)
 
 @tree.command(name="redeem", description="Redeem a credit code")
@@ -108,8 +77,6 @@ async def redeem(interaction: discord.Interaction, code: str):
     if code in redeem_codes:
         amount = redeem_codes.pop(code)
         user_credits[uid] = user_credits.get(uid, 0) + amount + 50
-        save_json(REDEEM_CODES_FILE, redeem_codes)
-        save_json(CREDITS_FILE, user_credits)
         await interaction.response.send_message(f"✅ Redeemed {amount}+50 credits! Total: {user_credits[uid]}", ephemeral=True)
     else:
         await interaction.response.send_message("❌ Invalid or already used code.", ephemeral=True)
@@ -127,30 +94,38 @@ async def add_admin(interaction: discord.Interaction, userid: int):
 async def createserver(interaction: discord.Interaction, name: str):
     uid = str(interaction.user.id)
     user_credits.setdefault(uid, 0)
-    save_json(CREDITS_FILE, user_credits)
-
     if user_credits[uid] < 250:
         return await interaction.response.send_message("❌ Not enough credits. You need 250.", ephemeral=True)
 
-    user_info = users_data.get(uid)
-    if not user_info:
-        return await interaction.response.send_message("❌ You must register first using /register.", ephemeral=True)
-
+    # Get available nodes
     nodes_res = requests.get(f"{PANEL_URL}/api/application/nodes", headers=get_headers())
     if nodes_res.status_code != 200:
         return await interaction.response.send_message("❌ Failed to fetch nodes.", ephemeral=True)
 
     nodes_data = nodes_res.json()["data"]
     available_nodes = [node["attributes"]["id"] for node in nodes_data if node["attributes"]["name"] not in ["in1", "Paris"]]
-
     if not available_nodes:
         return await interaction.response.send_message("❌ No available nodes.", ephemeral=True)
 
     selected_node = available_nodes[0]
 
+    # Get user email from registration
+    email = user_emails.get(uid)
+    if not email:
+        return await interaction.response.send_message("❌ You must register first using /register.", ephemeral=True)
+
+    # Find user ID in panel
+    users_res = requests.get(f"{PANEL_URL}/api/application/users", headers=get_headers())
+    panel_users = users_res.json()["data"]
+    panel_user_id = next((u["attributes"]["id"] for u in panel_users if u["attributes"]["email"] == email), None)
+
+    if not panel_user_id:
+        return await interaction.response.send_message("❌ Cannot find your registered panel user.", ephemeral=True)
+
+    # Prepare server data
     server_data = {
         "name": name,
-        "user": user_info["panel_id"],
+        "user": panel_user_id,
         "egg": 1,
         "docker_image": "ghcr.io/parkervcp/yolks:nodejs_18",
         "startup": "npm run start",
@@ -177,26 +152,13 @@ async def createserver(interaction: discord.Interaction, name: str):
         "start_on_completion": True
     }
 
+    # Create server
     server_res = requests.post(f"{PANEL_URL}/api/application/servers", json=server_data, headers=get_headers())
     if server_res.status_code == 201:
         user_credits[uid] -= 250
-        save_json(CREDITS_FILE, user_credits)
         await interaction.response.send_message(f"✅ Server created and 250 credits deducted. Remaining: {user_credits[uid]}", ephemeral=True)
     else:
         await interaction.response.send_message(f"❌ Server creation failed: {server_res.text}", ephemeral=True)
 
 bot.run(TOKEN)
-'''
-
-# Write to file
-bot_py_path = Path("/mnt/data/bot.py")
-bot_py_path.write_text(bot_py_code)
-
-# Create empty users.json
-(Path("/mnt/data/users.json")).write_text('{}')
-
-# Create empty credits.json and redeem_codes.json
-(Path("/mnt/data/credits.json")).write_text('{}')
-(Path("/mnt/data/redeem_codes.json")).write_text('{}')
-
-bot_py_path
+    
