@@ -4,7 +4,7 @@ import requests
 import json
 import os
 from dotenv import load_dotenv
-import asyncio
+import rn
 
 # Load environment variables
 load_dotenv()
@@ -12,123 +12,82 @@ BOT_TOKEN = 'BOT_TOKEN'
 PANEL_URL = "http://panel.dragoncloud.ggff.net"
 API_KEY = 'ptla_9M4qmqeDpJSioG4L2ZyX5hXfi5QCFq3fOSvslNzPaZR'
 
-# Initialize bot with slash commands support
+# Initialize bot
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='/', intents=intents)
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     print(f'Serving in {len(bot.guilds)} servers')
-    
-    # Sync slash commands
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
 
-# Test API connection function
-async def test_api_connection():
-    """Test if the API is accessible"""
-    try:
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Accept": "application/json"
-        }
-        
-        # Test with a simple API call
-        response = requests.get(f"{PANEL_URL}/api/application/users?per_page=1", headers=headers, timeout=10)
-        return response.status_code, response.text
-    except requests.exceptions.RequestException as e:
-        return None, str(e)
+def sanitize_username(username):
+    # Remove invalid characters
+    username = re.sub(r'[^a-zA-Z0-9._-]', '', username)
+    # Remove leading non-alphanumeric characters
+    username = re.sub(r'^[^a-zA-Z0-9]+', '', username)
+    # Remove trailing non-alphanumeric characters
+    username = re.sub(r'[^a-zA-Z0-9]+$', '', username)
+    return username
 
-# Slash command for registration
-@bot.tree.command(name="register", description="Register a new user with the Dragon Cloud panel")
-async def register_slash(interaction: discord.Interaction, email: str, password: str):
+# Command to register a user
+@bot.command(name='register')
+async def register(ctx, email: str, password: str):
     """Register a new user with the Dragon Cloud panel"""
-    
-    # Defer the response to avoid timeout
-    await interaction.response.defer(ephemeral=True)
-    
-    # Test API connection first
-    status_code, response_text = await test_api_connection()
-    if status_code is None:
-        await interaction.followup.send(f"❌ Cannot connect to Dragon Cloud panel. Error: {response_text}", ephemeral=True)
-        return
-    elif status_code != 200:
-        await interaction.followup.send(f"❌ API connection failed. Status: {status_code}. Please check API key.", ephemeral=True)
-        return
+    # Security check - delete the message to hide credentials
+    try:
+        await ctx.message.delete()
+    except:
+        pass
     
     # API endpoint for registration
     endpoint = f"{PANEL_URL}/api/application/users"
     
-    # Registration data with more specific fields
-    payload = {
-        "email": email,
-        "username": interaction.user.name[:16],  # Pterodactyl has username length limits
-        "first_name": interaction.user.display_name[:32] if interaction.user.display_name else interaction.user.name[:32],
-        "last_name": "User",
-        "password": password,
-        "language": "en",
-        "root_admin": False
-    }
+    # Registration data
+    original_username = interaction.user.name[:16]
+sanitized_username = sanitize_username(original_username)
+
+payload = {
+    "email": email,
+    "username": sanitized_username,
+    "first_name": interaction.user.display_name[:32] if interaction.user.display_name else interaction.user.name[:32],
+    "last_name": "User",
+    "password": password,
+    "language": "en",
+    "root_admin": False
+}
+
     
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "DragonCloudBot/1.0"
+        "Accept": "application/json"
     }
     
     try:
-        # First check if user already exists by email
-        check_endpoint = f"{PANEL_URL}/api/application/users"
-        check_params = {"filter[email]": email}
-        check_response = requests.get(check_endpoint, headers=headers, params=check_params, timeout=10)
+        # First check if user already exists
+        users_endpoint = f"{PANEL_URL}/api/application/users"
+        users_params = {"filter[email]": email}
+        users_response = requests.get(users_endpoint, headers=headers, params=users_params)
         
-        if check_response.status_code == 200:
-            existing_users = check_response.json().get('data', [])
-            if len(existing_users) > 0:
-                await interaction.followup.send(f"❌ Registration failed. A user with email `{email}` already exists.", ephemeral=True)
-                return
-        
-        # Also check by username
-        check_params = {"filter[username]": payload["username"]}
-        check_response = requests.get(check_endpoint, headers=headers, params=check_params, timeout=10)
-        
-        if check_response.status_code == 200:
-            existing_users = check_response.json().get('data', [])
-            if len(existing_users) > 0:
-                # Append numbers to make username unique
-                original_username = payload["username"]
-                for i in range(1, 100):
-                    new_username = f"{original_username}{i}"
-                    check_params = {"filter[username]": new_username}
-                    check_response = requests.get(check_endpoint, headers=headers, params=check_params, timeout=10)
-                    if check_response.status_code == 200 and len(check_response.json().get('data', [])) == 0:
-                        payload["username"] = new_username
-                        break
-        
-        # Proceed with registration
-        print(f"Attempting registration with payload: {json.dumps(payload, indent=2)}")
-        response = requests.post(endpoint, json=payload, headers=headers, timeout=15)
-        
-        print(f"Registration response status: {response.status_code}")
-        print(f"Registration response text: {response.text}")
+        if users_response.status_code == 200 and len(users_response.json().get('data', [])) > 0:
+            await ctx.send(f"❌ Registration failed. A user with email {email} already exists.")
+            return
+            
+        # If user doesn't exist, proceed with registration
+        response = requests.post(endpoint, json=payload, headers=headers)
         
         if response.status_code == 201:
             user_data = response.json().get('attributes', {})
             user_id = user_data.get('id')
-            username = user_data.get('username')
             
             embed = discord.Embed(
                 title="✅ Registration Successful!",
-                description=f"{interaction.user.mention}, your account has been created on the Dragon Cloud panel.",
+                description=f"{ctx.author.mention}, your account has been created on the Dragon Cloud panel.",
                 color=discord.Color.green()
             )
-            embed.add_field(name="Username", value=username, inline=True)
+            embed.add_field(name="Username", value=ctx.author.name, inline=True)
             embed.add_field(name="Email", value=email, inline=True)
             embed.add_field(name="User ID", value=user_id, inline=True)
             embed.add_field(name="Panel Link", value=PANEL_URL, inline=False)
@@ -136,135 +95,90 @@ async def register_slash(interaction: discord.Interaction, email: str, password:
                            value="You can now log in to the panel with your email and password. Use the `/createpaper` command to create your server!", 
                            inline=False)
             
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-        elif response.status_code == 422:
-            # Validation errors
+            # Send confirmation via DM for extra security
             try:
-                error_data = response.json()
-                errors = error_data.get('errors', {})
-                error_messages = []
-                for field, field_errors in errors.items():
-                    for error in field_errors:
-                        error_messages.append(f"**{field}**: {error}")
-                
-                error_text = "\n".join(error_messages) if error_messages else "Validation failed"
-                await interaction.followup.send(f"❌ Registration failed due to validation errors:\n{error_text}", ephemeral=True)
+                await ctx.author.send(embed=embed)
+                await ctx.send(f"✅ Registration successful! Check your DMs for details, {ctx.author.mention}.")
             except:
-                await interaction.followup.send(f"❌ Registration failed. Validation error. Response: {response.text}", ephemeral=True)
+                # If DM fails, send in channel but with less sensitive info
+                embed.remove_field(1)  # Remove email field
+                await ctx.send(embed=embed)
         else:
             error_message = "Unknown error"
             try:
                 error_data = response.json()
-                error_message = error_data.get('message', f'HTTP {response.status_code}')
-                if 'errors' in error_data:
-                    error_message += f"\nDetails: {json.dumps(error_data['errors'])}"
+                error_message = error_data.get('message', 'Unknown error')
             except:
-                error_message = f"HTTP {response.status_code}: {response.text}"
-            
-            await interaction.followup.send(f"❌ Registration failed. Error: {error_message}", ephemeral=True)
-            
-    except requests.exceptions.Timeout:
-        await interaction.followup.send("❌ Registration failed. Request timed out. Please try again.", ephemeral=True)
-    except requests.exceptions.ConnectionError:
-        await interaction.followup.send("❌ Registration failed. Cannot connect to Dragon Cloud panel.", ephemeral=True)
+                pass
+            await ctx.send(f"❌ Registration failed. Error: {error_message}")
     except Exception as e:
-        await interaction.followup.send(f"❌ An unexpected error occurred: {str(e)}", ephemeral=True)
-        print(f"Registration error: {e}")
+        await ctx.send(f"❌ An error occurred: {str(e)}")
 
 # Check if user already has a server
-async def check_user_servers(username):
-    """Check how many servers a user has"""
+async def check_user_servers(user_id):
+    endpoint = f"{PANEL_URL}/api/application/users/{user_id}?include=servers"
+    
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Accept": "application/json"
+    }
+    
     try:
-        # First get user by username
-        users_endpoint = f"{PANEL_URL}/api/application/users"
-        users_params = {"filter[username]": username}
+        response = requests.get(endpoint, headers=headers)
         
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Accept": "application/json"
-        }
-        
-        users_response = requests.get(users_endpoint, headers=headers, params=users_params, timeout=10)
-        
-        if users_response.status_code != 200 or len(users_response.json().get('data', [])) == 0:
-            return -1  # User not found
-        
-        user_id = users_response.json()['data'][0]['attributes']['id']
-        
-        # Get user's servers
-        servers_endpoint = f"{PANEL_URL}/api/application/users/{user_id}?include=servers"
-        servers_response = requests.get(servers_endpoint, headers=headers, timeout=10)
-        
-        if servers_response.status_code == 200:
-            user_data = servers_response.json().get('attributes', {})
-            servers = user_data.get('relationships', {}).get('servers', {}).get('data', [])
+        if response.status_code == 200:
+            servers = response.json().get('attributes', {}).get('relationships', {}).get('servers', {}).get('data', [])
             return len(servers)
         else:
             return 0
-            
-    except Exception as e:
-        print(f"Error checking user servers: {e}")
+    except:
         return 0
 
-# Slash command for creating Paper server
-@bot.tree.command(name="createserver", description="Create a new Paper Minecraft server (limit 1 per user)")
-async def createpaper_slash(interaction: discord.Interaction, server_name: str, node_id: int = 1):
+# Command to create a Paper server with 1 server limit per user
+@bot.command(name='createpaper')
+async def create_paper_server(ctx, server_name: str, node_id: str = "1"):
     """Create a new Paper Minecraft server (limit 1 per user)"""
+    await ctx.send(f"⏳ Processing your Paper server request for '{server_name}'...")
     
-    # Defer the response
-    await interaction.response.defer()
+    # Attempt to get user ID from the panel based on Discord username
+    users_endpoint = f"{PANEL_URL}/api/application/users"
+    users_params = {"filter[username]": ctx.author.name}
     
-    # Clean server name (remove special characters)
-    import re
-    clean_server_name = re.sub(r'[^a-zA-Z0-9\-_\s]', '', server_name)[:40]
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Accept": "application/json"
+    }
     
-    # Test API connection
-    status_code, response_text = await test_api_connection()
-    if status_code is None:
-        await interaction.followup.send(f"❌ Cannot connect to Dragon Cloud panel. Error: {response_text}")
-        return
-    elif status_code != 200:
-        await interaction.followup.send(f"❌ API connection failed. Status: {status_code}")
-        return
-    
-    # Check if user is registered
-    username = interaction.user.name[:16]
-    server_count = await check_user_servers(username)
-    
-    if server_count == -1:
-        await interaction.followup.send(f"❌ You need to register first using `/register [email] [password]`")
-        return
-    
-    if server_count >= 1:
-        await interaction.followup.send(f"❌ You already have {server_count} server(s). Only 1 server is allowed per user.")
-        return
-    
-    # Get user data for server creation
     try:
-        users_endpoint = f"{PANEL_URL}/api/application/users"
-        users_params = {"filter[username]": username}
+        # Find user on panel
+        users_response = requests.get(users_endpoint, headers=headers, params=users_params)
         
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Accept": "application/json"
-        }
+        if users_response.status_code != 200 or len(users_response.json().get('data', [])) == 0:
+            await ctx.send(f"❌ You need to register first using `/register [email] [password]`")
+            return
         
-        users_response = requests.get(users_endpoint, headers=headers, params=users_params, timeout=10)
-        user_id = users_response.json()['data'][0]['attributes']['id']
+        # Get the user ID from the response
+        user_data = users_response.json()['data'][0]
+        user_id = user_data['attributes']['id']
+        
+        # Check if user already has a server
+        server_count = await check_user_servers(user_id)
+        if server_count >= 1:
+            await ctx.send(f"❌ You already have a server. Only 1 server is allowed per user.")
+            return
         
         # API endpoint for server creation
         endpoint = f"{PANEL_URL}/api/application/servers"
         
-        # Paper server creation settings
+        # Paper server creation settings with fixed resource limits
         memory = 8192  # 8GB RAM
         cpu = 200      # 200% CPU
         disk = 20000   # 20GB Disk
         
         payload = {
-            "name": clean_server_name,
+            "name": server_name,
             "user": user_id,
-            "egg": 3,  # Paper egg ID (adjust if needed)
+            "egg": 3,  # Egg ID for Paper
             "docker_image": "ghcr.io/pterodactyl/yolks:java_21",
             "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
             "environment": {
@@ -289,13 +203,13 @@ async def createpaper_slash(interaction: discord.Interaction, server_name: str, 
             "start_on_completion": True
         }
         
-        headers["Content-Type"] = "application/json"
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
         
-        print(f"Creating server with payload: {json.dumps(payload, indent=2)}")
-        response = requests.post(endpoint, json=payload, headers=headers, timeout=20)
-        
-        print(f"Server creation response status: {response.status_code}")
-        print(f"Server creation response: {response.text}")
+        response = requests.post(endpoint, json=payload, headers=headers)
         
         if response.status_code == 201:
             server_data = response.json().get('attributes', {})
@@ -307,7 +221,7 @@ async def createpaper_slash(interaction: discord.Interaction, server_name: str, 
                 description=f"Your Paper Minecraft server has been created with high-performance resources.",
                 color=discord.Color.green()
             )
-            embed.add_field(name="Server Name", value=clean_server_name, inline=True)
+            embed.add_field(name="Server Name", value=server_name, inline=True)
             embed.add_field(name="Server ID", value=server_id, inline=True)
             embed.add_field(name="Memory", value="8GB", inline=True)
             embed.add_field(name="CPU Limit", value="200%", inline=True)
@@ -316,9 +230,9 @@ async def createpaper_slash(interaction: discord.Interaction, server_name: str, 
             embed.add_field(name="Server Status", value="🚀 Installing & starting automatically", inline=False)
             embed.set_footer(text="Dragon Cloud | High-Performance Minecraft Hosting")
             
-            await interaction.followup.send(embed=embed)
+            await ctx.send(embed=embed)
         else:
-            error_message = f"HTTP {response.status_code}"
+            error_message = "Unknown error"
             try:
                 error_data = response.json()
                 if 'message' in error_data:
@@ -326,17 +240,14 @@ async def createpaper_slash(interaction: discord.Interaction, server_name: str, 
                 elif 'errors' in error_data:
                     error_message = json.dumps(error_data['errors'])
             except:
-                error_message = response.text
-            
-            await interaction.followup.send(f"❌ Paper server creation failed. Error: {error_message}")
-            
+                pass
+            await ctx.send(f"❌ Paper server creation failed. Error: {error_message}")
     except Exception as e:
-        await interaction.followup.send(f"❌ An error occurred during server creation: {str(e)}")
-        print(f"Server creation error: {e}")
+        await ctx.send(f"❌ An error occurred: {str(e)}")
 
-# Slash command for help
-@bot.tree.command(name="help", description="Show available commands for Dragon Cloud bot")
-async def help_slash(interaction: discord.Interaction):
+# Simple help command
+@bot.command(name='dragonhelp')
+async def dragon_help(ctx):
     """Show available commands for Dragon Cloud bot"""
     embed = discord.Embed(
         title="Dragon Cloud Bot - Help",
@@ -353,35 +264,21 @@ async def help_slash(interaction: discord.Interaction):
     
     embed.add_field(
         name="🖥️ Server Creation",
-        value="`/createserver [server_name] [node_id]` - Create a Paper Minecraft server\n" +
-              "**Example:** `/createserver MySurvivalServer 1`\n" +
+        value="`/createpaper [server_name] [node_id]` - Create a Paper Minecraft server\n" +
+              "**Example:** `/createpaper MySurvivalServer 1`\n" +
               "**Limits:** 1 server per user, 8GB RAM, 200% CPU, 20GB Disk",
         inline=False
     )
     
     embed.add_field(
         name="ℹ️ Bot Help",
-        value="`/help` - Show this help message",
+        value="`/dragonhelp` - Show this help message",
         inline=False
     )
     
     embed.set_footer(text="Dragon Cloud | Premium Minecraft Hosting")
     
-    await interaction.response.send_message(embed=embed)
-
-# Debug command to test API
-@bot.tree.command(name="testapi", description="Test API connection (admin only)")
-async def test_api_slash(interaction: discord.Interaction):
-    """Test API connection"""
-    await interaction.response.defer(ephemeral=True)
-    
-    status_code, response_text = await test_api_connection()
-    
-    if status_code is None:
-        await interaction.followup.send(f"❌ API Connection Failed: {response_text}", ephemeral=True)
-    else:
-        await interaction.followup.send(f"✅ API Connection Successful: Status {status_code}", ephemeral=True)
+    await ctx.send(embed=embed)
 
 # Run the bot
-if __name__ == "__main__":
-    bot.run(TOKEN)
+bot.run(TOKEN)
