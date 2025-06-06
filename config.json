@@ -1,3 +1,5 @@
-token = ''
-admin_id = ''
-api_key = ''
+{
+  "token": "YOUR_DISCORD_BOT_TOKEN",
+  "admin_id": "YOUR_DISCORD_USER_ID",
+  "api_key": "ptla_D48KU0Liqs1CpSOayM9YtUxfXoaqzGwgk6SR2RTvliC"
+}
