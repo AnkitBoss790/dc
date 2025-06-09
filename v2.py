@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = ""
 PANEL_URL = "https://dragoncloud.godanime.net"
-API_KEY = ""
+API_KEY = "ptla_XIWptSIam95ls8GSKYkJTNknlimCw6wACioqikejvTQ"
 ADMIN_ID = "1159037240622723092"
 ADMIN_FILE = "admins.json"
 MSG_FILE = "messages.json"
