@@ -10,6 +10,9 @@ load_dotenv()
 TOKEN = ""
 PANEL_URL = "https://dragoncloud.godanime.net"
 API_KEY = ""
+ADMIN_ID = "1159037240622723092"
+ADMIN_FILE = "admins.json"
+MSG_FILE = "messages.json"
 
 def load_json(filename):
     if os.path.exists(filename):
@@ -24,6 +27,33 @@ def save_json(filename, data):
 users_data = load_json("users.json")
 antinuke_data = load_json("antinuke.json")
 
+def load_admins():
+    if os.path.exists(ADMIN_FILE):
+        with open(ADMIN_FILE) as f:
+            return json.load(f)
+    else:
+        return [str(config["admin_id"])]
+
+def save_admins(admins):
+    with open(ADMIN_FILE, "w") as f:
+        json.dump(admins, f, indent=4)
+
+admins = load_admins()
+
+# Load/save messages
+def load_messages():
+    if os.path.exists(MSG_FILE):
+        with open(MSG_FILE) as f:
+            return json.load(f)
+    else:
+        return {}
+
+def save_messages(messages):
+    with open(MSG_FILE, "w") as f:
+        json.dump(messages, f, indent=4)
+
+messages = load_messages()
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 tree = bot.tree
@@ -33,6 +63,29 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     await tree.sync()
 
+@tree.command(name="addadmin", description="Add a new admin (admin only)")
+@app_commands.describe(userid="User ID to add as admin")
+@admin_only()
+async def addadmin(interaction: discord.Interaction, userid: str):
+    global admins
+    if userid in admins:
+        await interaction.response.send_message(f"User ID `{userid}` is already an admin.", ephemeral=True)
+        return
+    admins.append(userid)
+    save_admins(admins)
+    await interaction.response.send_message(f"User ID `{userid}` added as admin.", ephemeral=True)
+
+@tree.command(name="new", description="Send message to a channel (admin only)")
+@app_commands.describe(message="Message to send", channel_id="Channel ID to send to")
+@admin_only()
+async def new(interaction: discord.Interaction, message: str, channel_id: str):
+    channel = bot.get_channel(int(channel_id))
+    if channel:
+        await channel.send(message)
+        await interaction.response.send_message(f"Message sent to <#{channel_id}>", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+    
 @tree.command(name="createaccount")
 @app_commands.checks.has_permissions(administrator=True)
 async def createaccount(interaction: discord.Interaction, email: str, password: str):
