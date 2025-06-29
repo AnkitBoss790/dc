@@ -17,7 +17,7 @@ with open("config.json") as f:
 TOKEN = ""
 ADMIN_ID = "1159037240622723092"
 PANEL_URL = "https://dragoncloud.godanime.net"
-API_KEY = ""
+API_KEY = "ptla_5gOLERPvZBYvYKZPoMo9XyyYgQdfXbewPxhwWZe5ybP"
 ADMIN_IDS = "1159037240622723092"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
