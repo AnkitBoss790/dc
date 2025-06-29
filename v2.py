@@ -271,94 +271,32 @@ async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📘 Command List", color=discord.Color.green())
     embed.add_field(name="/ownlist <userid>", value="🔒 Admin only: Generate server list for a user.", inline=False)
     embed.add_field(name="/list <userid>", value="📋 Show servers owned by a user.", inline=False)
-    embed.add_field(name="/upgrademc <userid> <serverid> <ram> <cpu> <disk>", value="⚙️ Admin only: Upgrade a server via Pterodactyl API.", inline=False)
     embed.add_field(name="/deleteownlist <userid>", value="🗑️ Admin only: Delete stored server list for a user.", inline=False)
-    embed.add_field(name="/manage <email> <password>", value="🎮 Show Minecraft server control buttons (start, stop, reboot, reinstall, get IP)", inline=False)
+    embed.add_field(name="/upgrademc <serverid> <ram> <cpu> <disk>", value="⚙️ Admin only: Upgrade server specs.", inline=False)
+    embed.add_field(name="/manage <token>", value="🎮 View & control Minecraft servers (client token)", inline=False)
+    embed.add_field(name="/getip <token> <serverid>", value="🌐 Get server IP address (client token)", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# -------------------- OWNLIST --------------------
-@bot.tree.command(name="ownlist", description="Generate random Minecraft server IDs for a user (admin only)")
-@app_commands.describe(userid="User's Discord ID")
-async def ownlist(interaction: discord.Interaction, userid: str):
-    if str(interaction.user.id) not in ADMIN_IDS:
-        await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
-        return
-
-    servers = [f"{random.randint(100000, 999999)}_IN" for _ in range(3)]
-
-    if not os.path.exists(data_file):
-        with open(data_file, "w") as f:
-            json.dump({}, f)
-
-    with open(data_file, "r") as f:
-        data = json.load(f)
-    data[userid] = servers
-    with open(data_file, "w") as f:
-        json.dump(data, f)
-
-    await interaction.response.send_message(f"✅ Created server list for `{userid}`:\n" + "\n".join(servers), ephemeral=True)
-
-# -------------------- DELETE OWNLIST --------------------
-@bot.tree.command(name="deleteownlist", description="Delete stored Minecraft server list for a user (admin only)")
-@app_commands.describe(userid="User's Discord ID")
-async def deleteownlist(interaction: discord.Interaction, userid: str):
-    if str(interaction.user.id) not in ADMIN_IDS:
-        await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
-        return
-
-    try:
-        with open(data_file, "r") as f:
-            data = json.load(f)
-
-        if userid in data:
-            del data[userid]
-            with open(data_file, "w") as f:
-                json.dump(data, f)
-            await interaction.response.send_message(f"🗑️ Deleted server list for `{userid}`.", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ No data found for this user.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"⚠️ Error: {e}", ephemeral=True)
-
-# -------------------- LIST --------------------
-@bot.tree.command(name="list", description="List Minecraft servers of a user from /ownlist")
-@app_commands.describe(userid="User's Discord ID")
-async def list_servers(interaction: discord.Interaction, userid: str):
-    try:
-        with open(data_file, "r") as f:
-            data = json.load(f)
-        servers = data.get(userid)
-        if not servers:
-            await interaction.response.send_message("❌ No servers found for this user.", ephemeral=True)
-            return
-        msg = f"📋 Servers owned by `{userid}`:\n" + "\n".join(f"- `{s}`" for s in servers)
-        await interaction.response.send_message(msg, ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"⚠️ Error reading list: {e}", ephemeral=True)
-
 # -------------------- UPGRADEMC --------------------
-@bot.tree.command(name="upgrademc", description="Upgrade RAM/CPU/Disk of a Minecraft server")
-@app_commands.describe(userid="User ID", serverid="Server ID", ram="RAM (MB, e.g., 12288)", cpu="CPU % (e.g., 100)", disk="Disk (MB, e.g., 20480)")
-async def upgrademc(interaction: discord.Interaction, userid: str, serverid: str, ram: int, cpu: int, disk: int):
+@bot.tree.command(name="upgrademc", description="Upgrade RAM/CPU/Disk of a Minecraft server (Admin only)")
+@app_commands.describe(serverid="Server Identifier", ram="RAM in MB", cpu="CPU %", disk="Disk in MB")
+async def upgrademc(interaction: discord.Interaction, serverid: str, ram: int, cpu: int, disk: int):
     if str(interaction.user.id) not in ADMIN_IDS:
-        await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
+        await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
-
-    internal_id = await get_server_internal_id(serverid)
-    if not internal_id:
-        await interaction.followup.send(f"❌ Server `{serverid}` not found.")
+    server_internal_id = await get_server_internal_id(serverid)
+    if not server_internal_id:
+        await interaction.followup.send("❌ Server not found or invalid server ID.")
         return
 
+    url = f"https://dragoncloud.godanime.net/api/application/servers/{server_internal_id}/build"
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-
-    url = f"https://dragoncloud.godanime.net/api/application/servers/{internal_id}/build"
-
     payload = {
         "allocation": None,
         "memory": ram,
@@ -373,78 +311,83 @@ async def upgrademc(interaction: discord.Interaction, userid: str, serverid: str
             "backups": 5
         }
     }
-
     async with aiohttp.ClientSession() as session:
         async with session.patch(url, headers=headers, json=payload) as resp:
             if resp.status == 200:
-                await interaction.followup.send(f"✅ Server `{serverid}` upgraded!\nRAM: `{ram}MB`, CPU: `{cpu}%`, Disk: `{disk}MB`")
+                await interaction.followup.send(f"✅ Upgraded server `{serverid}`. RAM: `{ram}`, CPU: `{cpu}`, Disk: `{disk}`")
             else:
                 text = await resp.text()
-                await interaction.followup.send(f"❌ Upgrade failed: `{resp.status}`\n{text}")
+                await interaction.followup.send(f"❌ Upgrade failed! Status: {resp.status}\n{text}")
 
-# -------------------- MANAGE --------------------
-@bot.tree.command(name="manage", description="Manage your Minecraft servers (Start, Stop, Reboot, Reinstall, IP)")
-@app_commands.describe(email="Your Panel Email", password="Your Panel Password")
-async def manage(interaction: discord.Interaction, email: str, password: str):
-    await interaction.response.defer(ephemeral=True)
-    cookies = await get_panel_cookies(email, password)
-    if not cookies:
-        await interaction.followup.send("❌ Login failed. Check your credentials.")
-        return
-    servers = await get_minecraft_servers(cookies, interaction.user.id)
-    if not servers:
-        await interaction.followup.send("⚠️ No servers found.")
-        return
+# -------------------- MANAGE + BUTTONS --------------------
+class ServerControlView(discord.ui.View):
+    def __init__(self, token: str, serverid: str):
+        super().__init__(timeout=None)
+        self.token = token
+        self.serverid = serverid
 
-    view = discord.ui.View()
-    for s in servers:
-        sid = s['attributes']['identifier']
-        name = s['attributes']['name']
-        view.add_item(discord.ui.Button(label=f"Start {name}", style=discord.ButtonStyle.green, custom_id=f"start_{sid}"))
-        view.add_item(discord.ui.Button(label=f"Stop {name}", style=discord.ButtonStyle.red, custom_id=f"stop_{sid}"))
-        view.add_item(discord.ui.Button(label=f"Reboot {name}", style=discord.ButtonStyle.blurple, custom_id=f"restart_{sid}"))
-        view.add_item(discord.ui.Button(label=f"Reinstall {name}", style=discord.ButtonStyle.gray, custom_id=f"reinstall_{sid}"))
-    await interaction.followup.send("🎮 Server controls loaded:", view=view, ephemeral=True)
-
-# -------------------- HELPERS --------------------
-async def get_panel_cookies(email, password):
-    try:
+    async def send_power_signal(self, interaction: discord.Interaction, signal: str):
+        url = f"https://dragoncloud.godanime.net/api/client/servers/{self.serverid}/power"
+        headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json", "Content-Type": "application/json"}
         async with aiohttp.ClientSession() as session:
-            async with session.post("https://dragoncloud.godanime.net/auth/login", data={
-                "email": email,
-                "password": password
-            }) as resp:
-                if resp.status in [200, 302]:
-                    return session.cookie_jar.filter_cookies("https://dragoncloud.godanime.net")
-    except:
-        pass
-    return None
+            async with session.post(url, headers=headers, json={"signal": signal}) as resp:
+                if resp.status == 204:
+                    await interaction.response.send_message(f"✅ `{signal}` sent to `{self.serverid}`.", ephemeral=True)
+                else:
+                    await interaction.response.send_message(f"❌ Failed to send `{signal}`. Status: {resp.status}", ephemeral=True)
 
-async def get_minecraft_servers(cookies, userid):
-    headers = {'Accept': 'application/json'}
-    try:
-        async with aiohttp.ClientSession(cookies=cookies) as session:
-            async with session.get("https://dragoncloud.godanime.net/api/client", headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return [s for s in data['data'] if str(s['attributes']['user']) == str(userid)]
-    except:
-        pass
-    return []
+    @discord.ui.button(label="Start", style=discord.ButtonStyle.success)
+    async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_power_signal(interaction, "start")
 
-async def get_server_internal_id(external_identifier):
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Accept": "application/json"
-    }
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger)
+    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_power_signal(interaction, "stop")
+
+    @discord.ui.button(label="Restart", style=discord.ButtonStyle.primary)
+    async def restart_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_power_signal(interaction, "restart")
+
+    @discord.ui.button(label="Reinstall", style=discord.ButtonStyle.secondary)
+    async def reinstall_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_power_signal(interaction, "reinstall")
+
+@bot.tree.command(name="manage", description="Show Minecraft servers with token and control buttons")
+@app_commands.describe(token="Your Pterodactyl Client API Token")
+async def manage(interaction: discord.Interaction, token: str):
+    await interaction.response.defer(ephemeral=True)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://dragoncloud.godanime.net/api/client", headers=headers) as resp:
+            if resp.status != 200:
+                await interaction.followup.send("❌ Invalid token.")
+                return
+            data = await resp.json()
+
+    servers = data.get("data", [])
+    if not servers:
+        await interaction.followup.send("❌ No servers found.", ephemeral=True)
+        return
+
+    for server in servers:
+        sid = server['attributes']['identifier']
+        name = server['attributes']['name']
+        embed = discord.Embed(title=f"🎮 {name} ({sid})", color=discord.Color.blurple())
+        embed.add_field(name="Controls", value="Start / Stop / Restart / Reinstall", inline=False)
+        await interaction.followup.send(embed=embed, view=ServerControlView(token, sid), ephemeral=True)
+
+# -------------------- GET SERVER INTERNAL ID --------------------
+async def get_server_internal_id(identifier):
     url = "https://dragoncloud.godanime.net/api/application/servers"
+    headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                for server in data["data"]:
-                    if server["attributes"]["identifier"] == external_identifier:
-                        return server["attributes"]["id"]
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            for s in data.get("data", []):
+                if s['attributes']['identifier'] == identifier:
+                    return s['attributes']['id']
     return None
 
 bot.run(TOKEN)
