@@ -707,23 +707,6 @@ async def get_server_internal_id(external_id):
                         return s['attributes']['id']
     return None
 
-# -------------------- MANAGE + BUTTONS --------------------
-class ServerControlView(discord.ui.View):
-    def __init__(self, token: str, serverid: str):
-        super().__init__(timeout=None)
-        self.token = token
-        self.serverid = serverid
-
-    async def send_power_signal(self, interaction: discord.Interaction, signal: str):
-        url = f"https://dragoncloud.godanime.net/api/client/servers/{self.serverid}/power"
-        headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json", "Content-Type": "application/json"}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json={"signal": signal}) as resp:
-                if resp.status == 204:
-                    await interaction.response.send_message(f" `{signal}` sent          await interaction.followup.send(f" Upgraded server `{serverid}`. RAM: `{ram}`, CPU: `{cpu}`, Disk: `{disk}`")
-            else:
-                text = await resp.text()
-                await interaction.followup.send(f"❌ Upgrade failed! Status: {resp.status}\n{text}")
 
 # -------------------- MANAGE + BUTTONS --------------------
 class ServerControlView(discord.ui.View):
