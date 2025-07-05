@@ -720,7 +720,7 @@ class ServerControlView(discord.ui.View):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json={"signal": signal}) as resp:
                 if resp.status == 204:
-                    await interaction.response.send_message(f"✅ `{signal}` sent          await interaction.followup.send(f"✅ Upgraded server `{serverid}`. RAM: `{ram}`, CPU: `{cpu}`, Disk: `{disk}`")
+                    await interaction.response.send_message(f" `{signal}` sent          await interaction.followup.send(f"✅ Upgraded server `{serverid}`. RAM: `{ram}`, CPU: `{cpu}`, Disk: `{disk}`")
             else:
                 text = await resp.text()
                 await interaction.followup.send(f"❌ Upgrade failed! Status: {resp.status}\n{text}")
