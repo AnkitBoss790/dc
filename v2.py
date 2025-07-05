@@ -796,4 +796,283 @@ async def get_server_internal_id(identifier):
                     return s['attributes']['id']
     return None
 
+# -------------------- GIVEAWAY --------------------
+@bot.tree.command(name="gstart", description="🎉 Start a giveaway (admin only)")
+@app_commands.describe(time="Time in minutes", winners="Number of winners", prize="Prize description")
+async def gstart(interaction: discord.Interaction, time: int, winners: int, prize: str):
+    if str(interaction.user.id) not in ADMIN_IDS:
+        await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
+        return
+
+    end_time = datetime.utcnow() + timedelta(minutes=time)
+    embed = discord.Embed(title="🎉 Giveaway Started!", color=discord.Color.gold())
+    embed.add_field(name="Prize", value=prize, inline=False)
+    embed.add_field(name="Ends In", value=f"{time} minutes", inline=False)
+    embed.add_field(name="Host", value=interaction.user.mention)
+    embed.set_footer(text=f"Ends at {end_time.strftime('%H:%M:%S UTC')}")
+
+    msg = await interaction.channel.send(embed=embed)
+    await msg.add_reaction("🎉")
+    await interaction.response.send_message("✅ Giveaway started!", ephemeral=True)
+
+    await asyncio.sleep(time * 60)
+
+    msg = await interaction.channel.fetch_message(msg.id)
+    users = await msg.reactions[0].users().flatten()
+    users = [u for u in users if not u.bot and u != interaction.user]
+    if len(users) < winners:
+        await interaction.channel.send("❌ Not enough participants.")
+    else:
+        winners_list = random.sample(users, winners)
+        winner_mentions = ", ".join([w.mention for w in winners_list])
+        await interaction.channel.send(f"🎉 Congratulations {winner_mentions}! You won **{prize}**")
+
+# -------------------- CHANGEPASS --------------------
+@bot.tree.command(name="changepass", description="🔐 Change user's Pterodactyl password (admin only)")
+@app_commands.describe(userid="User ID", api_key="Account API key", newpass="New password", confirmpass="Confirm password")
+async def changepass(interaction: discord.Interaction, userid: str, api_key: str, newpass: str, confirmpass: str):
+    if newpass != confirmpass:
+        await interaction.response.send_message("❌ Passwords do not match.", ephemeral=True)
+        return
+
+    if str(interaction.user.id) not in ADMIN_IDS:
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    headers = {
+        "Authorization": f"Bearer {PANEL_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    url = f"{PANEL_URL}/api/client/account/password"
+    payload = {"current_password": newpass, "password": newpass, "password_confirmation": confirmpass}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.put(url, headers=headers, json=payload) as resp:
+            if resp.status == 200:
+                await interaction.user.send(f"🔐 Your password has been updated.")
+                await interaction.user.send(f"🔑 Account API: `{api_key}`\n🔑 New Password: `{newpass}`")
+                await interaction.response.send_message("✅ Password changed and DM sent.", ephemeral=True)
+            else:
+                text = await resp.text()
+                await interaction.response.send_message(f"❌ Failed to update password.\n{text}", ephemeral=True)
+
+# -------------------- ACCOUNTAPI STORE --------------------
+@bot.tree.command(name="accountapi", description="📂 Add or show account API info")
+@app_commands.describe(userid="User ID", name="Api name", msg="Api Key Enter")
+async def accountapi(interaction: discord.Interaction, userid: str, api: str, name: str, msg: str):
+    if not os.path.exists(accountapi_file):
+        with open(accountapi_file, "w") as f:
+            json.dump({}, f)
+
+    with open(accountapi_file, "r") as f:
+        data = json.load(f)
+
+    data[userid] = {"name": name, "msg": msg}
+
+    with open(accountapi_file, "w") as f:
+        json.dump(data, f)
+
+    await interaction.response.send_message(f"✅ API stored for `{userid}`.", ephemeral=True)
+    user = bot.get_user(int(userid))
+    if user:
+        await user.send(f"📂 API Stored\n🔑 Key: `{api}`\n📛 Name: `{name}`\n📝 Message: {msg}")
+
+# -------------------- Helper to get panel user ID --------------------
+async def get_panel_user_id_by_email(email):
+    headers = {"Authorization": f"Bearer {PANEL_API_KEY}", "Accept": "application/json"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{PANEL_URL}/api/application/users", headers=headers) as resp:
+            if resp.status == 200:
+                users = await resp.json()
+                for u in users["data"]:
+                    if u["attributes"]["email"].lower() == email.lower():
+                        return u["attributes"]["id"]
+    return None
+
+# -------------------- /ac COMMAND (store account info) --------------------
+@bot.tree.command(name="ac", description="🔑 Store user account info")
+@app_commands.describe(userid="User ID", email="Panel email", password="Password")
+async def ac(interaction: discord.Interaction, userid: str, email: str, password: str):
+    accounts = {}
+    if os.path.exists(account_data_file):
+        with open(account_data_file, "r") as f:
+            accounts = json.load(f)
+
+    accounts[userid] = {"email": email, "password": password}
+
+    with open(account_data_file, "w") as f:
+        json.dump(accounts, f)
+
+    await interaction.response.send_message("✅ Account info saved for user.", ephemeral=True)
+
+# -------------------- /creates COMMAND --------------------
+@bot.tree.command(name="creates", description="🎮 Create Minecraft server using Boost or Invite plan")
+async def creates(interaction: discord.Interaction):
+    class PlanSelect(discord.ui.Select):
+        def __init__(self):
+            options = [
+                discord.SelectOption(label="2x Boost", description="12GB RAM, 4 CPU, 100GB Disk", value="boost2"),
+                discord.SelectOption(label="4x Boost", description="24GB RAM, 6 CPU, 150GB Disk", value="boost4"),
+                discord.SelectOption(label="6x Boost", description="32GB RAM, 8 CPU, 200GB Disk", value="boost6"),
+                discord.SelectOption(label="2 Invite", description="4GB RAM, 100% CPU, 10GB Disk", value="inv2"),
+                discord.SelectOption(label="4 Invite", description="6GB RAM, 150% CPU, 20GB Disk", value="inv4"),
+                discord.SelectOption(label="7 Invite", description="8GB RAM, 260% CPU, 35GB Disk", value="inv7"),
+                discord.SelectOption(label="10 Invite", description="12GB RAM, 290% CPU, 30GB Disk", value="inv10"),
+                discord.SelectOption(label="14 Invite", description="16GB RAM, 300% CPU, 40GB Disk", value="inv14"),
+            ]
+            super().__init__(placeholder="Select your plan", options=options, min_values=1, max_values=1)
+
+        async def callback(self, interaction2: discord.Interaction):
+            discord_id = str(interaction.user.id)
+            if not os.path.exists(account_data_file):
+                await interaction2.response.send_message("❌ No account found. Use /ac first.", ephemeral=True)
+                return
+
+            with open(account_data_file, "r") as f:
+                acc_data = json.load(f)
+
+            if discord_id not in acc_data:
+                await interaction2.response.send_message("❌ You must register using `/ac` before creating a server.", ephemeral=True)
+                return
+
+            email = acc_data[discord_id]["email"]
+            panel_user_id = await get_panel_user_id_by_email(email)
+            if not panel_user_id:
+                await interaction2.response.send_message("❌ Panel user not found.", ephemeral=True)
+                return
+
+            value = self.values[0]
+            plans = {
+                "boost2": {"ram": 12288, "cpu": 400, "disk": 100000},
+                "boost4": {"ram": 24576, "cpu": 600, "disk": 150000},
+                "boost6": {"ram": 32768, "cpu": 800, "disk": 200000},
+                "inv2": {"ram": 4096, "cpu": 100, "disk": 10000},
+                "inv4": {"ram": 6144, "cpu": 150, "disk": 20000},
+                "inv7": {"ram": 8192, "cpu": 260, "disk": 35000},
+                "inv10": {"ram": 12288, "cpu": 290, "disk": 30000},
+                "inv14": {"ram": 16384, "cpu": 300, "disk": 40000}
+            }
+            config = plans[value]
+            server_name = f"Dragon_{random.randint(1000,9999)}"
+
+            payload = {
+                "name": server_name,
+                "user": panel_user_id,
+                "egg": PANEL_APP_ID,
+                "docker_image": "ghcr.io/pterodactyl/yolks:java_17",
+                "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar",
+                "limits": {
+                    "memory": config['ram'],
+                    "swap": 0,
+                    "disk": config['disk'],
+                    "io": 500,
+                    "cpu": config['cpu']
+                },
+                "feature_limits": {"databases": 1, "backups": 1, "allocations": 1},
+                "environment": {
+                    "DL_VERSION": "latest",
+                    "SERVER_JARFILE": "server.jar",
+                    "BUILD_NUMBER": "latest",
+                    "STARTUP": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar"
+                },
+                "allocation": {"default": 1},
+                "deploy": {"locations": [NODE_ID], "dedicated_ip": False, "port_range": []},
+                "start_on_completion": True
+            }
+
+            headers = {
+                "Authorization": f"Bearer {PANEL_API_KEY}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+
+            await interaction2.response.send_message("🛠️ Creating your server... Please wait...", ephemeral=True)
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{PANEL_URL}/api/application/servers", json=payload, headers=headers) as resp:
+                    if resp.status in [200, 201]:
+                        await interaction.user.send(f"🎉 **Minecraft Server Created Successfully!**\n\n📛 **Name**: `{server_name}`\n📊 **RAM**: `{config['ram']//1024}GB`\n🧠 **CPU**: `{config['cpu']}%`\n💾 **Disk**: `{config['disk']//1000}GB`\n🌐 [Panel Link]({PANEL_URL})")
+                        await interaction.followup.send("✅ Server created and details sent via DM!", ephemeral=True)
+                    else:
+                        error = await resp.text()
+                        await interaction.followup.send(f"❌ Failed to create server.\n``{error}``", ephemeral=True)
+
+    class PlanView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+            self.add_item(PlanSelect())
+
+    await interaction.response.send_message("📦 Please select a plan: (Boost or Invite)", view=PlanView(), ephemeral=True)
+
+    # -------------------- /setupstatus --------------------
+@bot.tree.command(name="setupstatus", description="Set channel to post panel node status updates")
+@app_commands.describe(channelid="Channel ID to post updates")
+async def setupstatus(interaction: discord.Interaction, channelid: str):
+    if str(interaction.user.id) not in ADMIN_IDS:
+        await interaction.response.send_message("❌ Only admin can use this command.", ephemeral=True)
+        return
+    with open(status_channel_file, "w") as f:
+        f.write(channelid)
+    await interaction.response.send_message(f"✅ Status updates will be posted in <#{channelid}>", ephemeral=True)
+
+# -------------------- /nodes --------------------
+@bot.tree.command(name="nodes", description="📊 Show panel node stats")
+async def nodes(interaction: discord.Interaction):
+    headers = {"Authorization": f"Bearer {PANEL_API_KEY}", "Accept": "application/json"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{PANEL_URL}/api/application/servers/{self.server_id}/allocations", headers=headers) as resp:
+          session.get(f"{PANEL_URL}/api/application/nodes/{NODE_ID}", headers=headers) as resp2:
+            if resp1.status == 200 and resp2.status == 200:
+                allocs = await resp1.json()
+                node = await resp2.json()
+
+                name = node['attributes']['name']
+                mem = node['attributes']['memory']
+                disk = node['attributes']['disk']
+                used_mem = node['attributes']['allocated_resources']['memory']
+                used_disk = node['attributes']['allocated_resources']['disk']
+
+                embed = discord.Embed(title=f"🧠 Node: {name} Status", color=0x00ff00)
+                embed.add_field(name="Memory", value=f"{used_mem}/{mem} MB", inline=True)
+                embed.add_field(name="Disk", value=f"{used_disk}/{disk} MB", inline=True)
+                embed.set_footer(text="DragonCloud Panel Node Monitor")
+
+                await interaction.response.send_message(embed=embed)
+            else:
+                await interaction.response.send_message("❌ Failed to fetch node status.", ephemeral=True)
+
+# Background task (if you want auto-posting every X mins)
+@tasks.loop(minutes=10)
+async def post_status_update():
+    if not os.path.exists(status_channel_file):
+        return
+    with open(status_channel_file, "r") as f:
+        channel_id = f.read().strip()
+    try:
+        channel = bot.get_channel(int(channel_id))
+        if channel is None:
+            return
+        headers = {"Authorization": f"Bearer {PANEL_API_KEY}", "Accept": "application/json"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{PANEL_URL}/api/application/nodes/{NODE_ID}", headers=headers) as resp:
+                if resp.status == 200:
+                    node = await resp.json()
+                    name = node['attributes']['name']
+                    mem = node['attributes']['memory']
+                    disk = node['attributes']['disk']
+                    used_mem = node['attributes']['allocated_resources']['memory']
+                    used_disk = node['attributes']['allocated_resources']['disk']
+
+                    embed = discord.Embed(title=f"🧠 Node: {name} Status", color=0x3498db)
+                    embed.add_field(name="Memory", value=f"{used_mem}/{mem} MB", inline=True)
+                    embed.add_field(name="Disk", value=f"{used_disk}/{disk} MB", inline=True)
+                    embed.timestamp = datetime.utcnow()
+
+                    await channel.send(embed=embed)
+    except Exception as e:
+        print(f"Status update error: {e}")
+
+post_status_update.start()
+
 bot.run(TOKEN)
