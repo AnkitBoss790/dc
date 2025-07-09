@@ -16,8 +16,8 @@ with open("config.json") as f:
 TOKEN = ""
 ADMIN_ID = "1159037240622723092"
 PANEL_URL = "https://dragoncloud.godanime.net"
-PANEL_API_KEY = ""
-API_KEY = ""
+PANEL_API_KEY = "ptla_asJEzplI6c7bKLaUTArqfijag3jFNK8TdWb499sCbL3"
+API_KEY = "ptla_asJEzplI6c7bKLaUTArqfijag3jFNK8TdWb499sCbL3"
 ADMIN_IDS = "1159037240622723092"
 HEADERS = {"Authorization": f"Bearer {PANEL_API_KEY}", "Content-Type": "application/json"}
 EGG_ID = 1  # Replace with your Minecraft (Paper) egg ID
@@ -277,53 +277,57 @@ async def register(interaction: discord.Interaction, userid: str, username: str,
                 await interaction.response.send_message(f"❌ Failed: {resp.status} {text}", ephemeral=True)
 
 # -------------------- CREATEFREE --------------------
-@bot.tree.command(name="createfree", description="Create default 4GB server")
-@app_commands.describe(servername="Name", email="Email")
+@bot.tree.command(name="createfree", description="🎮 Create Free Minecraft Server")
+@app_commands.describe(servername="Your server name", email="Your panel email")
 async def createfree(interaction: discord.Interaction, servername: str, email: str):
-    await interaction.response.defer(ephemeral=True)
-    name = f"mc-{random.randint(1000, 9999)}"
-    payload = {
-        "name": servername,
-        "user": 1,  # Set user ID manually or from email
-        "egg": EGG_ID,
-        "docker_image": "ghcr.io/pterodactyl/yolks:java_17",  # Adjust if needed
-        "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar",
-        "limits": {
-            "memory": 4096,
-            "swap": 0,
-            "disk": 10240,
-            "io": 500,
-            "cpu": 100
-        },
-        "feature_limits": {"databases": 1, "backups": 1, "allocations": 1},
-        "environment": {
-            "SERVER_JARFILE": "server.jar",
-            "DL_PATH": "https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/123/downloads/paper-1.20.1-123.jar",
-            "SERVER_PORT": "25565"
-        },
-        "allocation": {
-            "default": 1  # Replace with real allocation ID
-        },
-        "deploy": {
-            "locations": [NODE_ID],
-            "dedicated_ip": False,
-            "port_range": []
-        },
-        "start_on_completion": True
-    }
     headers = {
         "Authorization": f"Bearer {PANEL_API_KEY}",
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f"{PANEL_URL}/api/application/servers", headers=headers, json=payload) as resp:
-            if resp.status == 201:
-                await interaction.followup.send("✅ Successfully created your server. Check panel!", ephemeral=True)
-            else:
-                text = await resp.text()
-                await interaction.followup.send(f"❌ Failed: {resp.status}\n{text}", ephemeral=True)
 
+    async with aiohttp.ClientSession() as session:
+        # Find panel user by email
+        async with session.get(f"{PANEL_URL}/api/application/users", headers=headers) as user_resp:
+            users = await user_resp.json()
+            user_id = None
+            for u in users["data"]:
+                if u["attributes"]["email"] == email:
+                    user_id = u["attributes"]["id"]
+                    break
+
+        if not user_id:
+            await interaction.response.send_message("❌ Panel user not found. Please create account using `/ac`.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("⏳ Creating your server. Please wait...", ephemeral=True)
+
+        # Server config
+        server_data = {
+            "name": servername,
+            "user": user_id,
+            "egg": MINECRAFT_EGG_ID,
+            "docker_image": "ghcr.io/pterodactyl/yolks:java_17",
+            "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar nogui",
+            "limits": {"memory": 4096, "swap": 0, "disk": 10240, "io": 500, "cpu": 100},
+            "feature_limits": {"databases": 0, "backups": 0, "allocations": 1},
+            "environment": {
+                "SERVER_JARFILE": "server.jar",
+                "DL_PATH": "https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/103/downloads/paper-1.20.1-103.jar",
+                "VERSION": "1.20.1",
+                "TYPE": "vanilla"
+            },
+            "deploy": {"locations": [1], "dedicated_ip": False, "port_range": []},
+            "start_on_completion": True
+        }
+
+        async with session.post(f"{PANEL_URL}/api/application/servers", headers=headers, json=server_data) as resp:
+            if resp.status in [200, 201]:
+                await interaction.followup.send("✅ Successfully created your server. Check panel link in DM!", ephemeral=True)
+                await interaction.user.send(f"🎉 Your Minecraft server `{servername}` has been created!\n🔗 Panel: {PANEL_URL}")
+            else:
+                error = await resp.text()
+                await interaction.followup.send(f"❌ Failed to create server: `{error}`", ephemeral=True)
 
 # -------------------- REMOVEALL --------------------
 @bot.tree.command(name="removeall", description="Remove all Minecraft servers by user ID")
@@ -390,7 +394,6 @@ async def get_server_internal_id(external_id):
                     if s['attributes']['identifier'] == external_id:
                         return s['attributes']['id']
     return None
-
 
 # -------------------- MANAGE + BUTTONS --------------------
 class ServerControlView(discord.ui.View):
@@ -573,106 +576,140 @@ async def ac(interaction: discord.Interaction, userid: str, email: str, password
 
     await interaction.response.send_message("✅ Account info saved for user.", ephemeral=True)
 
-# -------------------- /creates COMMAND --------------------
-@bot.tree.command(name="creates", description="🎮 Create Minecraft server using Boost or Invite plan")
+# -------------------- /creates with Real Plans (Boost/Invite Tiers) --------------------
+@bot.tree.command(name="creates", description="📦 Create Minecraft Server via Boost or Invite Plan")
 async def creates(interaction: discord.Interaction):
     class PlanSelect(discord.ui.Select):
         def __init__(self):
             options = [
-                discord.SelectOption(label="2x Boost", description="12GB RAM, 4 CPU, 100GB Disk", value="boost2"),
-                discord.SelectOption(label="4x Boost", description="24GB RAM, 6 CPU, 150GB Disk", value="boost4"),
-                discord.SelectOption(label="6x Boost", description="32GB RAM, 8 CPU, 200GB Disk", value="boost6"),
-                discord.SelectOption(label="2 Invite", description="4GB RAM, 100% CPU, 10GB Disk", value="inv2"),
-                discord.SelectOption(label="4 Invite", description="6GB RAM, 150% CPU, 20GB Disk", value="inv4"),
-                discord.SelectOption(label="7 Invite", description="8GB RAM, 260% CPU, 35GB Disk", value="inv7"),
-                discord.SelectOption(label="10 Invite", description="12GB RAM, 290% CPU, 30GB Disk", value="inv10"),
-                discord.SelectOption(label="14 Invite", description="16GB RAM, 300% CPU, 40GB Disk", value="inv14"),
+                discord.SelectOption(label="🎉 Boost Plan", value="boost"),
+                discord.SelectOption(label="🎁 Invite Plan", value="invite")
             ]
-            super().__init__(placeholder="Select your plan", options=options, min_values=1, max_values=1)
+            super().__init__(placeholder="Choose your plan...", options=options)
 
-        async def callback(self, interaction2: discord.Interaction):
-            discord_id = str(interaction.user.id)
-            if not os.path.exists(account_data_file):
-                await interaction2.response.send_message("❌ No account found. Use /ac first.", ephemeral=True)
-                return
+        async def callback(self, i2: discord.Interaction):
+            selected = self.values[0]
+            await i2.response.send_message(f"⏳ Verifying your {selected} access... Please wait.", ephemeral=True)
 
-            with open(account_data_file, "r") as f:
-                acc_data = json.load(f)
+            user = i2.user
+            guild = i2.guild
+            plan = None
 
-            if discord_id not in acc_data:
-                await interaction2.response.send_message("❌ You must register using `/ac` before creating a server.", ephemeral=True)
-                return
+            if selected == "boost":
+                # Count how many booster roles or premium subscriber roles
+                boost_count = sum(1 for r in user.roles if r.is_premium_subscriber() or "boost" in r.name.lower())
+                if boost_count >= 6:
+                    plan = {"ram": 32768, "cpu": 400, "disk": 71680, "name": "6x Boost"}
+                elif boost_count >= 4:
+                    plan = {"ram": 24576, "cpu": 300, "disk": 51200, "name": "4x Boost"}
+                elif boost_count >= 2:
+                    plan = {"ram": 12288, "cpu": 200, "disk": 30720, "name": "2x Boost"}
+                else:
+                    await i2.followup.send("❌ You need at least 2 boosts for Boost Plan (2x Boost).", ephemeral=True)
+                    return
+            else:
+                # Invite based plan: 5+, 10+, 20+
+                invites = await guild.invites()
+                count = sum(i.uses for i in invites if i.inviter and i.inviter.id == user.id)
+                if count >= 20:
+                    plan = {"ram": 16976, "cpu": 400, "disk": 71680, "name": "17+ Invites"}
+                elif count >= 10:
+                    plan = {"ram": 14986, "cpu": 300, "disk": 51200, "name": "13+ Invites"}
+                elif count >= 5:
+                    plan = {"ram": 12966, "cpu": 200, "disk": 30720, "name": "10+ Invites"}
+                else:
+                    plan = {"ram": 8196, "cpu": 200, "disk": 20720, "name": "6+ Invites"}
+                else:
+                    plan = {"ram": 4096, "cpu": 100, "disk": 10240, "name": "3+ Invites"}
+                else:
+                    await i2.followup.send(f"❌ You need at least 5 invites. You currently have `{count}`.", ephemeral=True)
+                    return
 
-            email = acc_data[discord_id]["email"]
-            panel_user_id = await get_panel_user_id_by_email(email)
-            if not panel_user_id:
-                await interaction2.response.send_message("❌ Panel user not found.", ephemeral=True)
-                return
+            await i2.followup.send(f"🛠️ Verified for **{plan['name']}**. Creating server in background. Please wait for a DM...", ephemeral=True)
 
-            value = self.values[0]
-            plans = {
-                "boost2": {"ram": 12288, "cpu": 400, "disk": 100000},
-                "boost4": {"ram": 24576, "cpu": 600, "disk": 150000},
-                "boost6": {"ram": 32768, "cpu": 800, "disk": 200000},
-                "inv2": {"ram": 4096, "cpu": 100, "disk": 10000},
-                "inv4": {"ram": 6144, "cpu": 150, "disk": 20000},
-                "inv7": {"ram": 8192, "cpu": 260, "disk": 35000},
-                "inv10": {"ram": 12288, "cpu": 290, "disk": 30000},
-                "inv14": {"ram": 16384, "cpu": 300, "disk": 40000}
-            }
-            config = plans[value]
-            server_name = f"Dragon_{random.randint(1000,9999)}"
+            # Background task
+            async def background_create():
+                email = f"{user.id}@dragonmail.local"
+                password = "dragon123"
+                username = f"user{user.id}"
+                servername = f"{plan['name'].replace(' ', '')}_{random.randint(1000, 9999)}"
 
-            payload = {
-                "name": server_name,
-                "user": panel_user_id,
-                "egg": PANEL_APP_ID,
-                "docker_image": "ghcr.io/pterodactyl/yolks:java_17",
-                "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar",
-                "limits": {
-                    "memory": config['ram'],
-                    "swap": 0,
-                    "disk": config['disk'],
-                    "io": 500,
-                    "cpu": config['cpu']
-                },
-                "feature_limits": {"databases": 1, "backups": 1, "allocations": 1},
-                "environment": {
-                    "DL_VERSION": "latest",
-                    "SERVER_JARFILE": "server.jar",
-                    "BUILD_NUMBER": "latest",
-                    "STARTUP": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar"
-                },
-                "allocation": {"default": 1},
-                "deploy": {"locations": [NODE_ID], "dedicated_ip": False, "port_range": []},
-                "start_on_completion": True
-            }
+                headers = {
+                    "Authorization": f"Bearer {PANEL_API_KEY}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
 
-            headers = {
-                "Authorization": f"Bearer {PANEL_API_KEY}",
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{PANEL_URL}/api/application/users", headers=headers) as user_resp:
+                        user_data = await user_resp.json()
+                        user_id = None
+                        for u in user_data['data']:
+                            if u['attributes']['email'] == email:
+                                user_id = u['attributes']['id']
+                                break
 
-            await interaction2.response.send_message("🛠️ Creating your server... Please wait...", ephemeral=True)
+                    if not user_id:
+                        reg_payload = {
+                            "username": username,
+                            "email": email,
+                            "first_name": user.name,
+                            "last_name": "Dragon",
+                            "password": password,
+                            "root_admin": False,
+                            "language": "en"
+                        }
+                        async with session.post(f"{PANEL_URL}/api/application/users", headers=headers, json=reg_payload) as reg_resp:
+                            if reg_resp.status in [200, 201]:
+                                data = await reg_resp.json()
+                                user_id = data['attributes']['id']
+                            else:
+                                err = await reg_resp.text()
+                                await user.send("❌ Failed to create account.\n```Check panel logs or credentials.```")
+                                
+                                return
+                               
+                    srv_payload = {
+                        "name": servername,
+                        "user": user_id,
+                        "egg": MINECRAFT_EGG_ID,
+                        "docker_image": "ghcr.io/pterodactyl/yolks:java_17",
+                        "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar nogui",
+                        "limits": {
+                            "memory": plan['ram'],
+                            "swap": 0,
+                            "disk": plan['disk'],
+                            "io": 500,
+                            "cpu": plan['cpu']
+                        },
+                        "feature_limits": {"databases": 0, "backups": 0, "allocations": 1},
+                        "environment": {
+                            "SERVER_JARFILE": "server.jar",
+                            "DL_PATH": "https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/103/downloads/paper-1.20.1-103.jar",
+                            "VERSION": "1.20.1",
+                            "TYPE": "vanilla"
+                        },
+                        "deploy": {"locations": [1], "dedicated_ip": False, "port_range": []},
+                        "start_on_completion": True
+                    }
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{PANEL_URL}/api/application/servers", json=payload, headers=headers) as resp:
-                    if resp.status in [200, 201]:
-                        await interaction.user.send(f"🎉 **Minecraft Server Created Successfully!**\n\n📛 **Name**: `{server_name}`\n📊 **RAM**: `{config['ram']//1024}GB`\n🧠 **CPU**: `{config['cpu']}%`\n💾 **Disk**: `{config['disk']//1000}GB`\n🌐 [Panel Link]({PANEL_URL})")
-                        await interaction.followup.send("✅ Server created and details sent via DM!", ephemeral=True)
-                    else:
-                        error = await resp.text()
-                        await interaction.followup.send(f"❌ Failed to create server.\n``{error}``", ephemeral=True)
+                    async with session.get(f"{PANEL_URL}/api/application/servers/{server_id}/allocations", headers=headers) as resp1:
+                     if srv_resp.status in [200, 201]:
+                            await user.send(f"✅ **Your server is ready!**\n**Plan:** {plan['name']}\n🔗 Panel: {PANEL_URL}\n📧 Email: `{email}`\n🔐 Password: `{password}`")
+                        else:
+                            err = await srv_resp.text()
+                            await user.send("❌ Failed to create server:\n```{err}```")
+
+            asyncio.create_task(background_create())
 
     class PlanView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=60)
             self.add_item(PlanSelect())
 
-    await interaction.response.send_message("📦 Please select a plan: (Boost or Invite)", view=PlanView(), ephemeral=True)
-
-    # -------------------- /setupstatus --------------------
+    await interaction.response.send_message("📦 Select your Minecraft server plan:", view=PlanView(), ephemeral=True)
+ 
+# -------------------- /setupstatus --------------------
 @bot.tree.command(name="setupstatus", description="Set channel to post panel node status updates")
 @app_commands.describe(channelid="Channel ID to post updates")
 async def setupstatus(interaction: discord.Interaction, channelid: str):
@@ -683,63 +720,48 @@ async def setupstatus(interaction: discord.Interaction, channelid: str):
         f.write(channelid)
     await interaction.response.send_message(f"✅ Status updates will be posted in <#{channelid}>", ephemeral=True)
 
-# -------------------- /nodes --------------------
-@bot.tree.command(name="nodes", description="📊 Show panel node stats")
+# -------------------- /nodes - Show Panel & Node Uptime --------------------
+@bot.tree.command(name="nodes", description="🌐 Show panel uptime and node status")
 async def nodes(interaction: discord.Interaction):
-    headers = {"Authorization": f"Bearer {PANEL_API_KEY}", "Accept": "application/json"}
+    await interaction.response.defer(ephemeral=True)
+
+    headers = {
+        "Authorization": f"Bearer {PANEL_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{PANEL_URL}/api/application/servers/{self.server_id}/allocations", headers=headers) as resp:
-          session.get(f"{PANEL_URL}/api/application/nodes/{NODE_ID}", headers=headers) as resp2:
-            if resp1.status == 200 and resp2.status == 200:
-                allocs = await resp1.json()
-                node = await resp2.json()
-
-                name = node['attributes']['name']
-                mem = node['attributes']['memory']
-                disk = node['attributes']['disk']
-                used_mem = node['attributes']['allocated_resources']['memory']
-                used_disk = node['attributes']['allocated_resources']['disk']
-
-                embed = discord.Embed(title=f"🧠 Node: {name} Status", color=0x00ff00)
-                embed.add_field(name="Memory", value=f"{used_mem}/{mem} MB", inline=True)
-                embed.add_field(name="Disk", value=f"{used_disk}/{disk} MB", inline=True)
-                embed.set_footer(text="DragonCloud Panel Node Monitor")
-
-                await interaction.response.send_message(embed=embed)
-            else:
-                await interaction.response.send_message("❌ Failed to fetch node status.", ephemeral=True)
-
-# Background task (if you want auto-posting every X mins)
-@tasks.loop(minutes=10)
-async def post_status_update():
-    if not os.path.exists(status_channel_file):
-        return
-    with open(status_channel_file, "r") as f:
-        channel_id = f.read().strip()
-    try:
-        channel = bot.get_channel(int(channel_id))
-        if channel is None:
+        # Panel Uptime Check
+        try:
+            async with session.get(f"{PANEL_URL}/api/application/nodes", headers=headers) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send("❌ Failed to fetch nodes from panel.")
+                    return
+                nodes_data = await resp.json()
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error connecting to panel: `{e}`")
             return
-        headers = {"Authorization": f"Bearer {PANEL_API_KEY}", "Accept": "application/json"}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{PANEL_URL}/api/application/nodes/{NODE_ID}", headers=headers) as resp:
-                if resp.status == 200:
-                    node = await resp.json()
-                    name = node['attributes']['name']
-                    mem = node['attributes']['memory']
-                    disk = node['attributes']['disk']
-                    used_mem = node['attributes']['allocated_resources']['memory']
-                    used_disk = node['attributes']['allocated_resources']['disk']
 
-                    embed = discord.Embed(title=f"🧠 Node: {name} Status", color=0x3498db)
-                    embed.add_field(name="Memory", value=f"{used_mem}/{mem} MB", inline=True)
-                    embed.add_field(name="Disk", value=f"{used_disk}/{disk} MB", inline=True)
-                    embed.timestamp = datetime.utcnow()
+        embed = discord.Embed(title="📊 Panel & Nodes Status", color=0x00ff99)
+        embed.set_footer(text="DragonCloud Node Monitor")
 
-                    await channel.send(embed=embed)
-    except Exception as e:
-        print(f"Status update error: {e}")
+        # Add Uptime Message
+        uptime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        embed.add_field(name="📅 Uptime Checked", value=f"`{uptime}`", inline=False)
 
-post_status_update.start()
+        # List all nodes
+        for node in nodes_data['data']:
+            attr = node['attributes']
+            name = attr['name']
+            location = attr['location_id']
+            mem = attr['memory']
+            disk = attr['disk']
+            used_mem = attr['allocated_resources']['memory']
+            used_disk = attr['allocated_resources']['disk']
+            status = f"RAM: {used_mem}/{mem} MB | Disk: {used_disk}/{disk} MB"
+            embed.add_field(name=f"🖥️ Node: {name} (Location {location})", value=status, inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 bot.run(TOKEN)
