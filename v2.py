@@ -696,9 +696,7 @@ async def creates(interaction: discord.Interaction):
                     async with session.get(f"{PANEL_URL}/api/application/servers/{server_id}/allocations", headers=headers) as resp1:
                      if srv_resp.status in [200, 201]:
                             await user.send(f"✅ **Your server is ready!**\n**Plan:** {plan['name']}\n🔗 Panel: {PANEL_URL}\n📧 Email: `{email}`\n🔐 Password: `{password}`")
-                        else:
-                            await user.send("❌ Failed to create server:\n```{err}```")
-
+                        
             asyncio.create_task(background_create())
 
     class PlanView(discord.ui.View):
