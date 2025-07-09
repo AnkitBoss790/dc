@@ -617,11 +617,11 @@ async def creates(interaction: discord.Interaction):
                     plan = {"ram": 14986, "cpu": 300, "disk": 51200, "name": "13+ Invites"}
                 elif count >= 5:
                     plan = {"ram": 12966, "cpu": 200, "disk": 30720, "name": "10+ Invites"}
-                else:
+                else
                     plan = {"ram": 8196, "cpu": 200, "disk": 20720, "name": "6+ Invites"}
-                else:
+                else
                     plan = {"ram": 4096, "cpu": 100, "disk": 10240, "name": "3+ Invites"}
-                else:
+                else
                     await i2.followup.send(f"❌ You need at least 5 invites. You currently have `{count}`.", ephemeral=True)
                     return
 
