@@ -697,7 +697,6 @@ async def creates(interaction: discord.Interaction):
                      if srv_resp.status in [200, 201]:
                             await user.send(f"✅ **Your server is ready!**\n**Plan:** {plan['name']}\n🔗 Panel: {PANEL_URL}\n📧 Email: `{email}`\n🔐 Password: `{password}`")
                         else:
-                            err = await srv_resp.text()
                             await user.send("❌ Failed to create server:\n```{err}```")
 
             asyncio.create_task(background_create())
