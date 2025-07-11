@@ -687,7 +687,7 @@ async def creates(interaction: discord.Interaction):
 async def multiple(interaction: discord.Interaction, a: int, b: int):
     await interaction.response.send_message(f"{a} × {b} = **{a * b}**", ephemeral=True)
 
-# ===============================================================================
+# -------------------- /nodes - Show Panel & Node Uptime --------------------
 @bot.tree.command(name="nodes", description="🌐 Show panel uptime and node status")
 async def nodes(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -702,78 +702,61 @@ async def nodes(interaction: discord.Interaction):
         try:
             async with session.get(f"{PANEL_URL}/api/application/nodes", headers=headers) as resp:
                 if resp.status != 200:
-                    await interaction.followup.send("❌ Failed to fetch nodes from panel.")
+                    await interaction.followup.send("❌ Failed to fetch node info.")
                     return
                 nodes_data = await resp.json()
         except Exception as e:
-            await interaction.followup.send(f"❌ Error connecting to panel: `{e}`")
+            await interaction.followup.send(f"❌ Panel error: `{e}`")
             return
 
-        embed = discord.Embed(title="📊 Panel & Nodes Status", color=0x00ff99)
-        embed.set_footer(text="DragonCloud Node Monitor")
-
-        uptime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        embed.add_field(name="📅 Uptime Checked", value=f"`{uptime}`", inline=False)
+        embed = discord.Embed(title="🌐 WardenCloud Node Status", color=0x00ff99)
+        embed.set_footer(text="Best Paid & Free Hosting")
+        embed.add_field(name="Uptime Checked", value=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), inline=False)
 
         for node in nodes_data['data']:
             attr = node['attributes']
             name = attr['name']
-            mem = attr['memory']
-            disk = attr['disk']
-            used_mem = attr['allocated_resources']['memory']
-            used_disk = attr['allocated_resources']['disk']
-            embed.add_field(name=f"🖥️ {name}", value=f"RAM: {used_mem}/{mem} MB\nDisk: {used_disk}/{disk} MB", inline=False)
+            ip = attr['fqdn'] + ":443"
+            status = attr.get("status", "unknown").capitalize()
+            embed.add_field(name=f"🖥 {name} - {ip}", value=f"Status: {status}\nRAM: Loading...\nDisk: Loading...", inline=False)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-# ------------------- /ca - Create Panel User (Admin Only) --------------------
-@bot.tree.command(name="ca", description="📥 Create panel user account (Admin only)")
-@app_commands.describe(userid="Discord user ID", email="Email", password="Password")
-async def ca(interaction: discord.Interaction, userid: str, email: str, password: str):
-    if interaction.user.id not in ADMIN_IDS:
-        await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
-        return
 
-    headers = {
-        "Authorization": f"Bearer {PANEL_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-    payload = {
-        "username": userid,
-        "email": email,
-        "first_name": userid,
-        "last_name": "Dragon",
-        "password": password
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f"{PANEL_URL}/api/application/users", json=payload, headers=headers) as resp:
-            if resp.status != 201:
-                await interaction.response.send_message("❌ Failed to create account.", ephemeral=True)
-                return
-            await interaction.response.send_message("✅ Panel account created.", ephemeral=True)
-
-
-# -------------------- /dm - Admin DM Any User --------------------
-@bot.tree.command(name="dm", description="✉️ Send DM to user (Admin only)")
-@app_commands.describe(userid="User ID", msg="Message to send")
-async def dm(interaction: discord.Interaction, userid: str, msg: str):
-    if interaction.user.id not in ADMIN_IDS:
-        await interaction.response.send_message("❌ Admin only.", ephemeral=True)
-        return
+# -------------------- /dm - Admin-only DM users --------------------
+@bot.tree.command(name="dm", description="📬 DM a user by ID")
+@app_commands.checks.has_permissions(administrator=True)
+async def dm(interaction: discord.Interaction, userid: str, message: str):
     try:
         user = await bot.fetch_user(int(userid))
-        await user.send(msg)
-        await interaction.response.send_message("✅ DM sent.", ephemeral=True)
-    except:
-        await interaction.response.send_message("❌ Failed to send DM.", ephemeral=True)
+        await user.send(message)
+        await interaction.response.send_message("✅ DM sent!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Failed: {e}", ephemeral=True)
 
 
-# -------------------- /ipcreate - IP and Ping Message --------------------
-@bot.tree.command(name="ipcreate", description="🌐 Send IP to user with PingYouMe")
-@app_commands.describe(ip="Example: node1.godanime.net:12345", ping="Example: @user")
+# -------------------- /ipcreate - Assign & Notify Ping IP --------------------
+@bot.tree.command(name="ipcreate", description="📡 Assign IP & notify admin")
 async def ipcreate(interaction: discord.Interaction, ip: str, ping: str):
-    await interaction.channel.send(f"**🎮 IP Created**: `{ip}`\n{ping} PingYouMe")
-    await interaction.response.send_message("✅ Sent to channel.", ephemeral=True)
+    try:
+        ping_id = int(ping.strip('<@!>'))
+        ping_user = await bot.fetch_user(ping_id)
+        admin = await bot.fetch_user(ADMIN_USER_ID)
+        await ping_user.send(f"🌐 Your game IP: `{ip}`")
+        await admin.send(f"🛡 IP Assigned: `{ip}` to <@{ping_id}>")
+        await interaction.response.send_message("✅ IP Sent.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+
+# -------------------- /controlpanel - Quick Panel Actions --------------------
+@bot.tree.command(name="controlpanel", description="⚙️ Quick access to panel functions")
+async def controlpanel(interaction: discord.Interaction):
+    class ControlPanelView(discord.ui.View):
+        @discord.ui.button(label="CreateServer", style=discord.ButtonStyle.green)
+        async def create(self, i: discord.Interaction, _):
+            await i.response.send_message("Use `/creates` or `/createfree`.", ephemeral=True)
+
+    await interaction.response.send_message("Control panel actions:", view=ControlPanelView(), ephemeral=True)
 
 bot.run(TOKEN)
