@@ -681,7 +681,13 @@ async def creates(interaction: discord.Interaction):
             await interaction.followup.send(f"✅ Server created! Login panel: {PANEL_URL}/server/{server_id}", ephemeral=True)
 
 
-# -------------------- /nodes - Show Panel & Node Uptime --------------------
+# -------------------- /multiple - Simple Multiplication Solver --------------------
+@bot.tree.command(name="multiple", description="✖️ Multiply two numbers (admin + users)")
+@app_commands.describe(a="First number", b="Second number")
+async def multiple(interaction: discord.Interaction, a: int, b: int):
+    await interaction.response.send_message(f"{a} × {b} = **{a * b}**", ephemeral=True)
+
+# ===============================================================================
 @bot.tree.command(name="nodes", description="🌐 Show panel uptime and node status")
 async def nodes(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -720,8 +726,7 @@ async def nodes(interaction: discord.Interaction):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-
-# -------------------- /ca - Create Panel User (Admin Only) --------------------
+# ------------------- /ca - Create Panel User (Admin Only) --------------------
 @bot.tree.command(name="ca", description="📥 Create panel user account (Admin only)")
 @app_commands.describe(userid="Discord user ID", email="Email", password="Password")
 async def ca(interaction: discord.Interaction, userid: str, email: str, password: str):
