@@ -641,9 +641,9 @@ async def creates(interaction: discord.Interaction):
     await interaction.response.send_message("📦 **Choose your plan:**", view=V())
 
 # Put your INVITE role IDs here (e.g., users get auto‑role when they reach 5 invites)
-I5  = 888888888888888888   # 14‑invite role
-I10 = 999999999999999999   # 19‑invite role
-I20 = 111111111111111111   # 27‑invite role
+I5  = 1393617300330123274  # 14‑invite role
+I10 = 1393617394806820965  # 19‑invite role
+I20 = 1393617507931259042   # 27‑invite role
 
 if plan.startswith("i"):
     # role based
