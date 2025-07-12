@@ -641,13 +641,13 @@ async def creates(interaction: discord.Interaction):
     await interaction.response.send_message("📦 **Choose your plan:**", view=V())
 
 # Put your INVITE role IDs here (e.g., users get auto‑role when they reach 5 invites)
-I5  = 1393617300330123274  # 14‑invite role
-I10 = 1393617394806820965  # 19‑invite role
-I20 = 1393617507931259042   # 27‑invite role
+I14  = 1393617300330123274  # 14‑invite role
+I19 = 1393617394806820965  # 19‑invite role
+I27 = 1393617507931259042   # 27‑invite role
 
 if plan.startswith("i"):
     # role based
-    rmap = {"i5": I5, "i10": I10, "i20": I20}
+    rmap = {"i14": I14, "i19": I19, "i27": I27}
     needed_role = rmap[plan]
     if needed_role not in [r.id for r in m.roles]:
         await i2.response.send_message("❌ You don’t have the required invite role.", ephemeral=True)
