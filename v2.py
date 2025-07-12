@@ -613,10 +613,10 @@ async def creates(interaction: discord.Interaction):
 
             await i2.response.send_message("⏳ Creating your server… check DM soon.", ephemeral=True)
             
-# Put your INVITE role IDs here (e.g., users get auto‑role when they reach 5 invites)
- I14  = 1393617300330123274  # 14‑invite role
- I19 = 1393617394806820965  # 19‑invite role
- I27 = 1393617507931259042   # 27‑invite role
+# ---------- ROLE IDS (edit these) ----------
+I14  = 1393617300330123274   # 14‑invite role
+I19 = 1393617394806820965   # 19-invite role
+I27 = 1393617507931259042   # 27‑invite role
 
 if plan.startswith("i"):
     # role based
