@@ -612,7 +612,20 @@ async def creates(interaction: discord.Interaction):
                     return
 
             await i2.response.send_message("⏳ Creating your server… check DM soon.", ephemeral=True)
+            
+# Put your INVITE role IDs here (e.g., users get auto‑role when they reach 5 invites)
+ I14  = 1393617300330123274  # 14‑invite role
+ I19 = 1393617394806820965  # 19‑invite role
+ I27 = 1393617507931259042   # 27‑invite role
 
+if plan.startswith("i"):
+    # role based
+    rmap = {"i14": I14, "i19": I19, "i27": I27}
+    needed_role = rmap[plan]
+    if needed_role not in [r.id for r in m.roles]:
+        await i2.response.send_message("❌ You don’t have the required invite role.", ephemeral=True)
+        return
+        
             # ---------- resource table ----------
             conf = {
                 "b2":  (8196, 200,  20796),
@@ -639,19 +652,6 @@ async def creates(interaction: discord.Interaction):
 
     # send view immediately (NO defer first)
     await interaction.response.send_message("📦 **Choose your plan:**", view=V())
-
-# Put your INVITE role IDs here (e.g., users get auto‑role when they reach 5 invites)
-I14  = 1393617300330123274  # 14‑invite role
-I19 = 1393617394806820965  # 19‑invite role
-I27 = 1393617507931259042   # 27‑invite role
-
-if plan.startswith("i"):
-    # role based
-    rmap = {"i14": I14, "i19": I19, "i27": I27}
-    needed_role = rmap[plan]
-    if needed_role not in [r.id for r in m.roles]:
-        await i2.response.send_message("❌ You don’t have the required invite role.", ephemeral=True)
-        return
 
 # -------------------- /multiple - Simple Multiplication Solver --------------------
 @bot.tree.command(name="multiple", description="✖️ Multiply two numbers (admin + users)")
